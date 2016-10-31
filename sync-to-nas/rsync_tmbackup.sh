@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+[ ! -z $DEBUG ] && set -x
 APPNAME=$(basename $0 | sed "s/\.sh$//")
 
 # -----------------------------------------------------------------------------
@@ -52,7 +52,7 @@ fn_parse_date() {
 }
 
 fn_find_backups() {
-	fn_run_cmd "find "$DEST_FOLDER" -type d -name "????-??-??-??????" -prune | sort -r"
+	fn_run_cmd "find "$DEST_FOLDER" -type d -name "????-??-??-??????" -prune | /ffp/bin/sort -r"
 }
 
 fn_expire_backup() {
@@ -242,7 +242,7 @@ if [ -n "$(fn_find "$INPROGRESS_FILE")" ]; then
 		# TODO: so the pgrep solution below won't work. Need to use "procps -wwFAH", grep
 		# TODO: the script name, and extract the process ID from it.
 		fn_log_warn "Cygwin only: Previous backup task has either been interrupted or it might still be active, but there is currently no check for this. Assuming that the task was simply interrupted."
-	else 
+	else
 		RUNNINGPID="$(fn_run_cmd "cat $INPROGRESS_FILE")"
 		if [ "$RUNNINGPID" = "$(pgrep "$APPNAME")" ]; then
 			fn_log_error "Previous backup task is still active - aborting."
