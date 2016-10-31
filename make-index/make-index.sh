@@ -4,7 +4,8 @@
 
 _IEXTENSION=(jpg png)
 _RECURSE=0
-_OUTDIR=/tmp/0imgIndex
+_OUTDIR=/var/cache/make-index
+PUBDIR="$_OUTDIR"
 _LOCALDIR=`pwd`
 
 IDX_BACK="black"
@@ -17,35 +18,46 @@ THU_DPY="300"
 IMG_PATH="."
 IMG_LIST=()
 
+# Index layout dimension (cm)
+LAY_WIDTH=20
+LAY_HEIGHT=27
+
+# Index line / row count
+IDX_ROW_COUNT=5
+IDX_LINE_COUNT=9
+THUMB_COUNT=$(( IDX_ROW_COUNT * IDX_LINE_COUNT ))
 
 
-function usage() {
-  echo "Usage: $0 -p [path] -d resolution -r ratio "
-  echo "         -p     : directory path that contains images [default .]"
-  echo "         -r     : set thumbnails height/width ratio [3/2]"
-  echo "         -d     : set thumbnails resolution [300]"
-  echo "         -T     : set index title [Index]"
-  echo "         -F     : set index base filename [index]"
-  echo "         -R     : recurse"
-  exit
+# 35mm en 300 dpi =>  environ 400 px
+RATIO=`bc -l <<< "scale=2; "$THU_RATIO `
+RES=$THU_DPY
+Wpx=`bc -l <<< "scale=0; ${RES} / 2.54 * 3.5"`
+Hpx=`bc -l <<< "scale=0; ${Wpx} / ${RATIO} "`
+
+function wlog() {
+  logger -p info.notice $*
 }
 
 
-function mkWorkDir() {
-    [ ! -d "$1/thumbs" ] && mkdir -p "$1/thumbs"
-    cleanWorkDir "$1"
+function makeDir() {
+    [ ! -d "$1" ] && {
+      mkdir -p "$1"
+      [ $? -ne 0 ] && {
+        echo "** I can't create directory $1/thumbs."
+        exit
+      }
+    }
 }
+
 function cleanWorkDir() {
-    (cd "$1" && rm -f thumbs/*)
+    (cd "$1" && rm -f *)
 }
 
 function makePseudoThumb() {
   Hc=`bc -l <<< "scale=0; ${Hpx} + 30 "`
-  convert -size ${Wpx}x${Hc} xc:${IDX_FRONT} $1
+  #convert -size ${Wpx}x${Hc} xc:${IDX_FRONT} $1
+  convert -size ${Wpx}x${Hc} xc:'#DDD' $1
 }
-
-LAY_WIDTH=20
-LAY_HEIGHT=27
 
 function makeLayout() {
 
@@ -81,42 +93,44 @@ function cropImage() {
   e="${f##*.}"
   f="${f%.*}"
 
-  idate=`identify -format "%[EXIF:DateTimeOriginal]" $1`
-  dim=`identify -format "%[fx:w]:%[fx:h]" $1`
-  Adim=(${dim//:/ })
+  idate=`identify -format "%[EXIF:DateTimeOriginal]" "$1"`
+  Wdim=`identify -format "%[fx:w]" "$1"`
+  Hdim=`identify -format "%[fx:h]" "$1"`
 
   SCALE="${Wpx}x"
   ROTATE=""
-  [ ${Adim[0]} -lt ${Adim[1]} ] && {
-	   ROTATE="-rotate -90"
+  RANGLE=""
+  [ ${Wdim} -lt ${Hdim} ] && {
+	   ROTATE=-rotate
+     RANGLE=-90
   }
   Hc=`bc -l <<< "scale=0; ${Hpx} + 30 "`
 
-  BOX="-size ${Wpx}x${Hc} xc:${IDX_BACK} +swap -gravity North -composite "
   convert  "$1" \
-	   ${ROTATE} \
+	   $ROTATE $RANGLE\
 	  -resize ${SCALE}  \
-	   ${BOX} \
-	    -strip  \
-	     "$_OUTDIR/thumbs/t.$f.jpg"
+	  -size ${Wpx}x${Hc} xc:${IDX_BACK} +swap -gravity North -composite  \
+	  -strip  \
+	  "$_OUTDIR/thumbs/t.jpg"
 
   convert \
 	   -background ${IDX_BACK} -fill white -size ${Wpx}x30 \
      -font "courier" -pointsize 24 \
-     caption:"[$2]_${f}"  \
-     "$_OUTDIR/thumbs/t.$f.jpg"  +swap -gravity SouthEast -composite \
-     "$_OUTDIR/thumbs/c.$f.jpg"
+     caption:"[$2]${f}"  \
+     "$_OUTDIR/thumbs/t.jpg"  +swap -gravity SouthEast -composite \
+     "$_OUTDIR/thumbs/c.$2.jpg"
 
-  rm "$_OUTDIR/thumbs/t.$f.jpg"
+  rm "$_OUTDIR/thumbs/t.jpg"
 
 }
+
 function makeIndex() {
     l=`ls $1/thumbs/c.*.jpg`
     #montage -background ${BACK} -geometry +4+4 $l $_OUTDIR/m.png
     rg=`printf "%05d" $2`
     tIFile="${_OUTDIR}/t.${IDX_FILE}-"$rg".jpg"
-    IFile="${_OUTDIR}/${IDX_FILE}-"$rg".jpg"
-    echo -n " > building Index $IFile"
+    IFile="${PUBDIR}/${IDX_FILE}-"$rg".jpg"
+    echo -n " > building Index $2 / $3 ($IFile)"
     montage -tile 5x12 -background white -geometry +1+1 $l jpg:-  > "$tIFile"
     rm $1/thumbs/c.*.jpg
     mergeLayoutIndex "$tIFile" "$IFile" "$IDX_TITLE" "[Index $2 / $3 ]"
@@ -124,28 +138,40 @@ function makeIndex() {
     echo
 }
 
-
 function findImages() {
   _filter=""
   for e in ${_IEXTENSION[@]}; do
     if [ $_RECURSE == 1 ]; then
       _filter=$_filter'\|'$e'\|'${e^^}
     else
-      _filter=$_filter' '$IMG_PATH'/*.'$e' '$IMG_PATH'/*.'${e^^}
+      _filter=$_filter' "'$IMG_PATH'/*.'$e'" "'$IMG_PATH'/*.'${e^^}'"'
     fi
   done
   if [ $_RECURSE == 1 ]; then
-    IMG_LIST=(`find $IMG_PATH -regex  ".*\.\($_filter\)$" -print | sort `)
+    IMG_LIST=(`find "$IMG_PATH" -regex  ".*\.\($_filter\)$" -print | sort`)
   else
     IMG_LIST=(`ls $_filter`)
   fi
 }
 
-while getopts ":r:p:d:F:T:R" o; do
+function usage() {
+  echo "Usage: $0 -p [path] -d resolution -r ratio "
+  echo "         -p     : directory path that contains images [default .]"
+  echo "         -I     : directory to publish indexes [default $_OUTDIR]"
+  echo "         -r     : set thumbnails height/width ratio [3/2]"
+  echo "         -d     : set thumbnails resolution [300]"
+  echo "         -T     : set index title [Index]"
+  echo "         -F     : set index base filename [index]"
+  echo "         -R     : recurse"
+  exit
+}
+
+while getopts ":r:p:d:F:I:T:R" o; do
     case "${o}" in
         r) THU_RATIO=${OPTARG} ;;
         d) THU_DPY=${OPTARG} ;;
         p) IMG_PATH=${OPTARG} ;;
+        I) PUBDIR=${OPTARG} ;;
         T) IDX_TITLE=${OPTARG} ;;
         F) IDX_FILE=${OPTARG} ;;
         R) _RECURSE=1;;
@@ -157,29 +183,24 @@ while getopts ":r:p:d:F:T:R" o; do
 done
 shift $((OPTIND-1))
 
-LCOUNT=5
-RCOUNT=9
-CIMG=$(( LCOUNT * RCOUNT ))
+makeDir "$_OUTDIR/thumbs"
+cleanWorkDir "$_OUTDIR/thumbs"
 
-
-mkWorkDir "$_OUTDIR"
+makeDir "$PUBDIR"
 
 [ ! -d "$IMG_PATH" ] && {
     echo "** I can't found directory ${IMG_PATH}."
     exit
 }
 
-# 35mm en 300 dpi =>  environ 400 px
-RATIO=`bc -l <<< "scale=2; "$THU_RATIO `
-RES=$THU_DPY
-Wpx=`bc -l <<< "scale=0; ${RES} / 2.54 * 3.5"`
-Hpx=`bc -l <<< "scale=0; ${Wpx} / ${RATIO} "`
 echo "-- resolution     : $RES dpi "
 echo "-- thumbnail size : ${Wpx}px × ${Hpx}px (ratio ${RATIO})"
 echo "-- dir to scan    : $IMG_PATH"
 
 makeLayout
 
+OIFS="$IFS"
+IFS=$'\n'
 findImages "$IMG_PATH"
 IMG_COUNT=${#IMG_LIST[@]}
 
@@ -187,29 +208,31 @@ Index=0
 Count=0
 NIndex=1
 Start=1
-IdxCount=`bc -l <<< "scale=0; $IMG_COUNT / $CIMG + 1"`
+IdxCount=`bc -l <<< "scale=0; $IMG_COUNT / $THUMB_COUNT + 1"`
 
 echo "-- $IMG_COUNT images to process ($IdxCount index sheets)"
 
 for img in ${IMG_LIST[@]}; do
   Index=$(( Index + 1 ))
   Count=$(( Count + 1 ))
-  echo -ne \\r"-- processing image $Count [$img]"
+  echo -ne \\r"-- processing image $Count / $IMG_COUNT [$img]"
   cropImage "$img" "$Count"
-  if [ $Index -eq $CIMG ]; then
+  if [ $Index -eq $THUMB_COUNT ]; then
 	  makeIndex "$_OUTDIR" $NIndex $IdxCount
     Index=0
     NIndex=$(( NIndex + 1 ))
     Start=$NIndex
   fi
 done
+
 [ $Index -gt 0 ] && {
-  PCount=$((CIMG - Index))
+  PCount=$((THUMB_COUNT - Index))
   for ((a=1; a <= PCount ; a++)); do
     makePseudoThumb "$_OUTDIR/thumbs/c.zzzzzzzzzzz-$a.jpg"
   done
   makeIndex "$_OUTDIR" $NIndex $IdxCount
 }
 
+IFS="$OIFS"
 
-cleanWorkDir "$_OUTDIR"
+cleanWorkDir "$_OUTDIR/thumbs"
