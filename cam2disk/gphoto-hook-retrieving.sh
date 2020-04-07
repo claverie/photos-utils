@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 BASEDIR=`dirname $0`
-_LIB=`basename $0`
+#_LIB=`basename $0`
+_LIB='(hook)'
 
 case "$ACTION" in
 
@@ -21,6 +22,8 @@ case "$ACTION" in
   [ "$AllExif" == "" ] && AllExif=`exiftool "$ARGUMENT"`
   HASH=`echo "$AllExif" | md5sum | sed -e "s/  -//"`
 	NFILE="${YEA}${MON}${DAY}${HOU}${MIN}${SEC}-$HASH.$EXT"
+  _lname="${YEA}${MON}${DAY}${HOU}${MIN}${SEC}....$EXT"
+
 	TARGET_DIR="$PHOTOBASE/$YEA/$MON"
   [ -n "$DEBUG" ]  && {
       echo "${_LIB}% NFILE      :   $NFILE"
@@ -32,7 +35,7 @@ case "$ACTION" in
       rm "$ARGUMENT"
 	else
 	    state="OK"
-	    echo "${_LIB}: récupération de $ARGUMENT ($EXT) -> $TARGET_DIR/$NFILE"
+	    echo "${_LIB}: $ARGUMENT ($EXT) -> $_lname"
 	    [  ! -d "$TARGET_DIR" ] && {
 		      echo "${_LIB}: création du dossier $TARGET_DIR/.exif"
 		      [ ! -n "$DEBUG" ]  && mkdir -p "$TARGET_DIR/.exif"
